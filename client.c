@@ -1,53 +1,102 @@
-/*
- * CLIENT.C - Cliente do Jogo da Velha
- * Local: client/client.c
- * 
- * Compilar: gcc client.c -o ../bin/client.exe -lws2_32 -I../shared
- * Executar: cd bin && client.exe
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <winsock2.h>
-#include <windows.h>
-#include <process.h>
 
 #pragma comment(lib, "ws2_32.lib")
-
-// Incluir arquivos compartilhados
 #include "../shared/protocol.h"
-#include "../shared/config.h"
 
-// Variáveis globais do cliente
 SOCKET sock;
-int my_player_num = 0;
+int my_player = 0;
 char my_symbol = ' ';
-GameState game_state;
 
-// Protótipos de funções
-void display_board();
-void parse_state(char* message);
-unsigned __stdcall receive_messages(void* arg);
+void display_board(char* board) {
+    system("cls");
+    printf("\n=== JOGO DA VELHA ===\n");
+    printf("Voce: Jogador %d (%c)\n\n", my_player, my_symbol);
+    
+    printf(" %c | %c | %c \n", board[0], board[1], board[2]);
+    printf("---|---|---\n");
+    printf(" %c | %c | %c \n", board[3], board[4], board[5]);
+    printf("---|---|---\n");
+    printf(" %c | %c | %c \n\n", board[6], board[7], board[8]);
+}
 
-// Função para exibir o tabuleiro
-void display_board() {
-    system(CLEAR_SCREEN);
+void parse_message(char* buffer) {
+    if(strncmp(buffer, "PLAYER:", 7) == 0) {
+        sscanf(buffer, "PLAYER:%d:%c", &my_player, &my_symbol);
+        printf("Voce e o Jogador %d (%c)\n", my_player, my_symbol);
+    }
+    else if(strncmp(buffer, "STATE:", 6) == 0) {
+        char board[10];
+        int turn, over, winner;
+        sscanf(buffer, "STATE:%9[^:]:%d:%d:%d", board, &turn, &over, &winner);
+        
+        display_board(board);
+        
+        if(over) {
+            if(winner == my_player) printf("*** VOCE VENCEU! ***\n");
+            else if(winner == 0) printf("*** EMPATE! ***\n");
+            else printf("*** VOCE PERDEU! ***\n");
+        } else {
+            if(turn == my_player) printf("Sua vez! Digite posicao (0-8): ");
+            else printf("Aguardando adversario...\n");
+        }
+    }
+    else if(strncmp(buffer, "ERROR:", 6) == 0) {
+        printf "Jogada invalida! Tente novamente.\n");
+    }
+}
+
+int main() {
+    WSADATA wsa;
+    struct sockaddr_in server;
+    char buffer[BUFFER_SIZE];
     
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║    %s    ║\n", GAME_NAME);
-    printf("╚════════════════════════════════════════╝\n\n");
+    printf("=== CLIENTE JOGO DA VELHA ===\n");
     
-    printf("Você: Jogador %d (%c)  |  Adversário: Jogador %d (%c)\n", 
-           my_player_num, my_symbol,
-           (my_player_num == 1) ? 2 : 1,
-           (my_player_num == 1) ? SYMBOL_P2 : SYMBOL_P1);
+    WSAStartup(MAKEWORD(2,2), &wsa);
+    sock = socket(AF_INET, SOCK_STREAM, 0);
     
-    printf("\n     |     |     \n");
-    printf("  %c  |  %c  |  %c  \n", 
-           game_state.board[0], 
-           game_state.board[1], 
-           game_state.board[2]);
-    printf("_____|_____|_____\n");
-    printf("     |     |     \n");
-    printf("  %c  |  %c  |  %c  \n",
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+    server.sin_port = htons(8888);
+    
+    if(connect(sock, (struct sockaddr*)&server, sizeof(server)) < 0) {
+        printf("Erro ao conectar!\n");
+        return 1;
+    }
+    
+    printf("Conectado ao servidor!\n");
+    
+    while(1) {
+        // Receber mensagens do servidor
+        memset(buffer, 0, BUFFER_SIZE);
+        int recv_size = recv(sock, buffer, BUFFER_SIZE, 0);
+        if(recv_size > 0) {
+            parse_message(buffer);
+            
+            // Se for minha vez, ler jogada
+            if(strncmp(buffer, "STATE:", 6) == 0) {
+                char board[10];
+                int turn, over, winner;
+                sscanf(buffer, "STATE:%9[^:]:%d:%d:%d", board, &turn, &over, &winner);
+                
+                if(!over && turn == my_player) {
+                    int pos;
+                    printf("Sua jogada (0-8): ");
+                    scanf("%d", &pos);
+                    
+                    format_move_msg(buffer, pos);
+                    send(sock, buffer, strlen(buffer), 0);
+                }
+            }
+        } else {
+            break;
+        }
+    }
+    
+    closesocket(sock);
+    WSACleanup();
+    return 0;
+}
